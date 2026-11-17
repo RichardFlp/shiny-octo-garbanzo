@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debugger Chan</title>
+<style>
+  :root {
+    --rail: #1e1f22; --side: #2b2d31; --main: #313338; --hover: #2e3035; --input: #383a40;
+    --text: #dbdee1; --muted: #949ba4; --head: #f2f3f5; --accent: #5865f2; --link: #00a8fc;
+    --mention-bg: rgba(250,166,26,.1); --mention-bar: #f0b232; --danger: #f23f43;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; background: var(--main); color: var(--text);
+         font: 16px/1.375 "gg sans", "Noto Sans", "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-thumb { background: #1a1b1e; border-radius: 4px; }
+
+  /* server rail */
+  #rail { width: 72px; background: var(--rail); padding: 12px 0; display: flex; flex-direction: column;
+          align-items: center; gap: 8px; overflow-y: auto; flex-shrink: 0; }
+  .gicon { position: relative; width: 48px; height: 48px; border-radius: 50%; background: var(--main);
+           display: grid; place-items: center; font-weight: 600; font-size: 15px; color: var(--head);
+           transition: border-radius .15s, background .15s; overflow: visible; }
+  .gicon img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+  .gicon:hover, .gicon.active { border-radius: 16px; background: var(--accent); }
+  .gicon::before { content: ""; position: absolute; left: -16px; width: 8px; border-radius: 0 4px 4px 0;
+                   background: var(--head); height: 0; transition: height .15s; }
+  .gicon.unread::before { height: 8px; } .gicon:hover::before { height: 20px; } .gicon.active::before { height: 40px; }
+  .gicon .badge { position: absolute; right: -4px; bottom: -4px; }
+  .sep { width: 32px; height: 2px; background: #35363c; border-radius: 1px; }
+
+  /* channel sidebar */
+  #side { width: 240px; background: var(--side); display: flex; flex-direction: column; flex-shrink: 0; }
+  #side header { height: 48px; padding: 0 16px; display: flex; align-items: center; font-weight: 600;
+                 color: var(--head); box-shadow: 0 1px 0 rgba(0,0,0,.25); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #channels { flex: 1; overflow-y: auto; padding: 8px 8px 16px; }
+  .cat { margin: 16px 0 4px 4px; font-size: 12px; font-weight: 600; text-transform: uppercase;
+         letter-spacing: .02em; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+  .cat button { font-size: 18px; line-height: 1; color: var(--muted); } .cat button:hover { color: var(--head); }
+  .chan { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px; border-radius: 4px;
+          color: var(--muted); text-align: left; position: relative; }
+  .chan.thread { padding-left: 28px; font-size: 14px; }
+  .chan:hover { background: var(--hover); color: var(--text); }
+  .chan.active { background: #404249; color: var(--head); }
+  .chan.unread { color: var(--head); font-weight: 600; }
+  .chan.unread::before { content: ""; position: absolute; left: -8px; width: 4px; height: 8px; background: var(--head); border-radius: 0 4px 4px 0; }
+  .chan .hash { font-size: 20px; width: 20px; text-align: center; opacity: .7; flex-shrink: 0; }
+  .chan .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .chan img { width: 32px; height: 32px; border-radius: 50%; }
+  .badge { background: var(--danger); color: #fff; font-size: 12px; font-weight: 700; border-radius: 8px;
+           min-width: 16px; height: 16px; padding: 0 4px; display: grid; place-items: center; }
+  #mebar { height: 52px; background: #232428; display: flex; align-items: center; gap: 8px; padding: 0 8px; }
+  #mebar img { width: 32px; height: 32px; border-radius: 50%; }
+  #mebar .nm { font-size: 14px; font-weight: 600; color: var(--head); }
+  #mebar .st { font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; background: var(--danger); }
+  .dot.on { background: #23a55a; }
+
+  /* chat */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #main header { height: 48px; padding: 0 16px; display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+                 font-weight: 600; color: var(--head); box-shadow: 0 1px 0 rgba(0,0,0,.25); }
+  #main header .hash { color: var(--muted); font-size: 22px; }
+  #scroller { flex: 1; overflow-y: auto; padding-bottom: 16px; }
+  #older { display: block; margin: 12px auto; color: var(--link); font-size: 14px; }
+  .empty { color: var(--muted); padding: 32px 16px; }
+  .msg { position: relative; padding: 2px 48px 2px 72px; min-height: 22px; }
+  .msg.head { margin-top: 17px; padding-top: 2px; min-height: 44px; }
+  .msg:hover { background: rgba(2,2,2,.06); }
+  .msg.mention { background: var(--mention-bg); box-shadow: inset 2px 0 0 var(--mention-bar); }
+  .msg.replying { background: rgba(88,101,242,.1); box-shadow: inset 2px 0 0 var(--accent); }
+  .msg .av { position: absolute; left: 16px; top: 4px; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; }
+  .msg .who { display: flex; align-items: baseline; gap: 8px; }
+  .msg .name { font-weight: 500; color: var(--head); cursor: pointer; }
+  .msg .name:hover { text-decoration: underline; }
+  .tag { background: var(--accent); color: #fff; font-size: 10px; font-weight: 600; padding: 1px 4px; border-radius: 3px; position: relative; top: -2px; }
+  .msg .time { font-size: 12px; color: var(--muted); }
+  .msg .stamp { position: absolute; left: 0; width: 72px; text-align: center; font-size: 11px; color: var(--muted);
+                top: 6px; visibility: hidden; }
+  .msg:hover .stamp { visibility: visible; }
+  .body { white-space: pre-wrap; word-wrap: break-word; color: var(--text); }
+  .body a { color: var(--link); text-decoration: none; } .body a:hover { text-decoration: underline; }
+  .body code { background: #2b2d31; border-radius: 4px; padding: 0 3px; font: 14px Consolas, monospace; }
+  .body pre { background: #2b2d31; border: 1px solid #1e1f22; border-radius: 4px; padding: 8px; margin: 4px 0;
+              font: 14px Consolas, monospace; white-space: pre-wrap; max-width: 100%; }
+  .body .ment { background: rgba(88,101,242,.3); color: #c9cdfb; border-radius: 3px; padding: 0 2px; font-weight: 500; }
+  .body .emoji { width: 22px; height: 22px; vertical-align: bottom; }
+  .body .spoiler { background: #1e1f22; color: transparent; border-radius: 3px; cursor: pointer; }
+  .body .spoiler.shown { background: rgba(255,255,255,.1); color: inherit; }
+  .body blockquote { margin: 0; padding-left: 12px; border-left: 4px solid #4e5058; }
+  .edited { font-size: 10px; color: var(--muted); }
+  .replyline { font-size: 13px; color: var(--muted); display: flex; gap: 4px; align-items: center; margin-bottom: 2px;
+               white-space: nowrap; overflow: hidden; cursor: pointer; }
+  .replyline b { color: var(--head); font-weight: 500; }
+  .replyline span { overflow: hidden; text-overflow: ellipsis; }
+  .att img { max-width: min(400px, 100%); max-height: 300px; border-radius: 8px; margin-top: 4px; display: block; }
+  .att a.file { display: inline-block; margin-top: 4px; background: #2b2d31; border: 1px solid #1e1f22; padding: 10px 14px;
+                border-radius: 8px; color: var(--link); text-decoration: none; }
+  .embed { border-left: 4px solid var(--accent); background: #2b2d31; border-radius: 4px; padding: 8px 16px 12px 12px;
+           margin-top: 4px; max-width: 520px; }
+  .embed .t { font-weight: 600; color: var(--head); white-space: pre-wrap; }
+  .embed .d { font-size: 14px; white-space: pre-wrap; margin-top: 4px; }
+  .embed img { max-width: 100%; border-radius: 4px; margin-top: 8px; }
+  .tools { position: absolute; right: 16px; top: -12px; background: var(--main); border: 1px solid #26272b;
+           border-radius: 6px; display: none; }
+  .msg:hover .tools { display: flex; }
+  .tools button { padding: 4px 8px; font-size: 13px; color: var(--muted); } .tools button:hover { color: var(--head); background: var(--hover); }
+
+  /* composer */
+  #composer { padding: 0 16px 24px; flex-shrink: 0; }
+  #replybar { background: #2b2d31; border-radius: 8px 8px 0 0; padding: 8px 16px; font-size: 14px; color: var(--muted);
+              display: flex; align-items: center; gap: 12px; }
+  #replybar b { color: var(--head); }
+  #replybar label { margin-left: auto; cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none; }
+  #replybar button { font-size: 18px; color: var(--muted); }
+  #box { background: var(--input); border-radius: 8px; display: flex; align-items: flex-end; }
+  #replybar:not([hidden]) + #box { border-radius: 0 0 8px 8px; }
+  #input { flex: 1; background: none; border: 0; outline: 0; resize: none; color: var(--text); font: inherit;
+           padding: 11px 16px; max-height: 50vh; }
+  #input::placeholder { color: #6d6f78; }
+  #count { font-size: 12px; color: var(--muted); padding: 12px; }
+  #count.over { color: var(--danger); }
+  #error { color: var(--danger); font-size: 13px; padding: 4px 4px 0; min-height: 0; }
+  [hidden] { display: none !important; }
+  #toast { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); background: var(--danger); color: #fff;
+           padding: 6px 14px; border-radius: 6px; font-size: 14px; }
+</style>
+</head>
+<body>
+<nav id="rail"></nav>
+<aside id="side">
+  <header id="gname">Debugger Chan</header>
+  <div id="channels"></div>
+  <div id="mebar"></div>
+</aside>
+<main id="main">
+  <header><span class="hash" id="chash">#</span><span id="cname">pick a channel</span></header>
+  <div id="scroller"><div class="empty">Pick a channel on the left.</div></div>
+  <div id="composer">
+    <div id="replybar" hidden>
+      <span>Replying to <b id="replyname"></b></span>
+      <label><input type="checkbox" id="ping" checked> ping</label>
+      <button id="cancelreply" title="Cancel reply">&times;</button>
+    </div>
+    <div id="box">
+      <textarea id="input" rows="1" placeholder="Pick a channel first" disabled></textarea>
+      <span id="count"></span>
+    </div>
+    <div id="error"></div>
+  </div>
+</main>
+<div id="toast" hidden></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const DM = "@me";
+let state = { guilds: [], dms: [], me: null };
+let guildId = null, channelId = null;
+let messages = [];          // current channel, oldest first
+let replyTo = null;
+let unread = {};            // channel id -> count
+let mentions = {};          // channel id -> count of messages that ping her
+let socketUp = false, sending = false, lastTyping = 0;
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function toast(text) {
+  const t = $("toast"); t.textContent = text; t.hidden = false;
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.hidden = true), 4000);
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+function initials(name) {
+  return name.split(/\s+/).map((w) => w[0] || "").join("").slice(0, 3);
+}
+
+function channelOwner(id) {
+  if (state.dms.some((d) => d.id === id)) return DM;
+  const g = state.guilds.find((g) => g.channels.some((c) => c.id === id));
+  return g ? g.id : null;
+}
+
+/* ---------- markdown (the bits Discord users actually use) ---------- */
+function inline(text, m) {
+  // Links, emoji and mentions are parked as tokens so bold/italic never touch their markup.
+  const held = [];
+  const hold = (html) => `\u0000${held.push(html) - 1}\u0000`;
+  let s = esc(text);
+  s = s.replace(/&lt;(a?):(\w+):(\d+)&gt;/g, (_, a, n, id) =>
+    hold(`<img class="emoji" alt=":${n}:" title=":${n}:" src="https://cdn.discordapp.com/emojis/${id}.${a ? "gif" : "webp"}?size=48">`));
+  s = s.replace(/&lt;@!?(\d+)&gt;/g, (_, id) =>
+    hold(`<span class="ment">@${esc((m.mentions || {})[id] || (state.me && state.me.id === id ? state.me.name : "unknown"))}</span>`));
+  s = s.replace(/&lt;@&amp;(\d+)&gt;/g, (_, id) => hold(`<span class="ment">@${esc((m.role_mentions || {})[id] || "role")}</span>`));
+  s = s.replace(/&lt;#(\d+)&gt;/g, (_, id) => hold(`<span class="ment">#${esc((m.channel_mentions || {})[id] || findChannelName(id))}</span>`));
+  s = s.replace(/&lt;t:(\d+)(?::\w)?&gt;/g, (_, t) => hold(`<code>${new Date(t * 1000).toLocaleString()}</code>`));
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => hold(`<a href="${url}" target="_blank" rel="noopener">`) + label + hold("</a>"));
+  s = s.replace(/&lt;(https?:\/\/[^\s]+?)&gt;/g, (_, url) => hold(`<a href="${url}" target="_blank" rel="noopener">${url}</a>`));
+  s = s.replace(/https?:\/\/[^\s\u0000]+/g, (url) => hold(`<a href="${url}" target="_blank" rel="noopener">${url}</a>`));
+  s = s.replace(/\*\*\*(.+?)\*\*\*/g, "<b><i>$1</i></b>")
+       .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+       .replace(/__(.+?)__/g, "<u>$1</u>")
+       .replace(/(^|[^*\w])\*(?!\s)(.+?)\*(?!\w)/g, "$1<i>$2</i>")
+       .replace(/(^|[^_\w])_(?!\s)(.+?)_(?!\w)/g, "$1<i>$2</i>")
+       .replace(/~~(.+?)~~/g, "<s>$1</s>")
+       .replace(/\|\|(.+?)\|\|/g, '<span class="spoiler" onclick="this.classList.add(\'shown\')">$1</span>');
+  s = s.replace(/^-# (.*)$/gm, '<small style="color:var(--muted)">$1</small>')
+       .replace(/^### (.*)$/gm, '<b style="font-size:1.1em">$1</b>')
+       .replace(/^## (.*)$/gm, '<b style="font-size:1.25em">$1</b>')
+       .replace(/^# (.*)$/gm, '<b style="font-size:1.5em">$1</b>')
+       .replace(/^&gt; (.*)$/gm, "<blockquote>$1</blockquote>");
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => held[i]);
+}
+
+function render(text, m = {}) {
+  // code first so nothing inside it is formatted
+  const parts = String(text || "").split(/(```[\s\S]*?```|`[^`\n]+`)/g);
+  return parts.map((p) => {
+    if (p.startsWith("```") && p.length >= 6) {
+      return `<pre>${esc(p.slice(3, -3).replace(/^[\w+-]*\n/, ""))}</pre>`;
+    }
+    if (p.startsWith("`") && p.endsWith("`") && p.length > 2) return `<code>${esc(p.slice(1, -1))}</code>`;
+    return inline(p, m);
+  }).join("");
+}
+
+function findChannelName(id) {
+  for (const g of state.guilds) for (const c of g.channels) if (c.id === id) return c.name;
+  return "channel";
+}
+
+/* ---------- sidebar ---------- */
+function renderRail() {
+  const rail = $("rail");
+  const dmUnread = state.dms.reduce((n, d) => n + (unread[d.id] || 0), 0);
+  let html = `<button class="gicon ${guildId === DM ? "active" : ""} ${dmUnread ? "unread" : ""}" data-g="${DM}" title="Direct messages">
+      ${state.me ? `<img src="${esc(state.me.avatar)}" alt="">` : "DM"}
+      ${dmUnread ? `<span class="badge">${dmUnread}</span>` : ""}</button><div class="sep"></div>`;
+  for (const g of state.guilds) {
+    const u = g.channels.some((c) => unread[c.id]);
+    const ping = g.channels.reduce((n, c) => n + (mentions[c.id] || 0), 0);
+    html += `<button class="gicon ${g.id === guildId ? "active" : ""} ${u ? "unread" : ""}" data-g="${g.id}" title="${esc(g.name)}">
+      ${g.icon ? `<img src="${esc(g.icon)}" alt="">` : esc(initials(g.name))}
+      ${ping ? `<span class="badge">${ping}</span>` : ""}</button>`;
+  }
+  rail.innerHTML = html;
+}
+
+function renderChannels() {
+  const box = $("channels");
+  if (guildId === DM) {
+    $("gname").textContent = "Direct Messages";
+    let html = `<div class="cat">Direct messages <button id="newdm" title="Message someone by user id">+</button></div>`;
+    if (!state.dms.length) html += `<div class="empty" style="padding:8px">No DMs yet. Hit + and paste a user id.</div>`;
+    for (const d of state.dms) {
+      html += `<button class="chan ${d.id === channelId ? "active" : ""} ${unread[d.id] ? "unread" : ""}" data-c="${d.id}">
+        <img src="${esc(d.avatar)}" alt=""><span class="nm">${esc(d.name)}</span>
+        ${unread[d.id] ? `<span class="badge">${unread[d.id]}</span>` : ""}</button>`;
+    }
+    box.innerHTML = html;
+    $("newdm").onclick = newDm;
+    return;
+  }
+  const g = state.guilds.find((g) => g.id === guildId);
+  if (!g) { box.innerHTML = ""; $("gname").textContent = "Debugger Chan"; return; }
+  $("gname").textContent = g.name;
+  let html = "", cat = null;
+  for (const c of g.channels) {
+    if (c.category !== cat) { cat = c.category; if (cat) html += `<div class="cat">${esc(cat)}</div>`; }
+    html += `<button class="chan ${c.thread ? "thread" : ""} ${c.id === channelId ? "active" : ""} ${unread[c.id] ? "unread" : ""}" data-c="${c.id}">
+      <span class="hash">${c.thread ? "&#8627;" : "#"}</span><span class="nm">${esc(c.name)}</span>
+      ${mentions[c.id] ? `<span class="badge">${mentions[c.id]}</span>` : ""}</button>`;
+  }
+  box.innerHTML = html;
+}
+
+function renderMe() {
+  const me = state.me;
+  $("mebar").innerHTML = me ? `<img src="${esc(me.avatar)}" alt=""><div><div class="nm">${esc(me.name)}</div>
+    <div class="st"><span class="dot ${socketUp ? "on" : ""}"></span>${socketUp ? "live" : "reconnecting…"}</div></div>` : "";
+}
+
+function renderSidebar() { renderRail(); renderChannels(); renderMe(); updateTitle(); }
+
+function updateTitle() {
+  const n = Object.values(mentions).reduce((a, b) => a + b, 0) + state.dms.reduce((n, d) => n + (unread[d.id] || 0), 0);
+  document.title = (n ? `(${n}) ` : "") + "Debugger Chan";
+}
+
+$("rail").onclick = (e) => {
+  const b = e.target.closest("[data-g]"); if (!b) return;
+  guildId = b.dataset.g; store.set("guild", guildId); renderSidebar();
+};
+$("channels").onclick = (e) => {
+  const b = e.target.closest("[data-c]"); if (b) openChannel(b.dataset.c);
+};
+
+async function newDm() {
+  const id = prompt("User id (or paste a <@mention>) to DM as Debugger Chan:");
+  if (!id) return;
+  try {
+    const dm = await api("/api/dm", { user: id });
+    if (!state.dms.some((d) => d.id === dm.id)) state.dms.unshift(dm);
+    openChannel(dm.id);
+  } catch (err) { toast(err.message); }
+}
+
+/* ---------- messages ---------- */
+function msgHtml(m, prev) {
+  const t = new Date(m.created * 1000);
+  const grouped = prev && !m.reply_to && prev.author.id === m.author.id && m.created - prev.created < 420;
+  const cls = ["msg", grouped ? "" : "head", m.mentions_me ? "mention" : "", replyTo && replyTo.id === m.id ? "replying" : ""].join(" ");
+  const time = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const day = t.toDateString() === new Date().toDateString() ? `Today at ${time}` : `${t.toLocaleDateString()} ${time}`;
+  let h = `<div class="${cls}" data-id="${m.id}">`;
+  if (m.reply_to) {
+    const r = m.reply_to;
+    h += `<div class="replyline" data-jump="${r.id}">&#8625; ${r.author ? `<b>@${esc(r.author)}</b>` : ""}<span>${esc(r.content || (r.author ? "attachment" : "original message was deleted"))}</span></div>`;
+  }
+  if (grouped) h += `<span class="stamp">${time}</span>`;
+  else h += `<img class="av" src="${esc(m.author.avatar)}" alt="" data-mention="${m.author.id}">
+    <div class="who"><span class="name" data-mention="${m.author.id}">${esc(m.author.name)}</span>
+    ${m.author.bot ? '<span class="tag">BOT</span>' : ""}<span class="time" title="${esc(t.toLocaleString())}">${day}</span></div>`;
+  if (m.content) h += `<div class="body">${render(m.content, m)}${m.edited ? ' <span class="edited">(edited)</span>' : ""}</div>`;
+  for (const a of m.attachments) {
+    h += `<div class="att">${a.image ? `<a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" alt="${esc(a.name)}" loading="lazy"></a>`
+                             : `<a class="file" href="${esc(a.url)}" target="_blank">&#128206; ${esc(a.name)}</a>`}</div>`;
+  }
+  for (const e of m.embeds) {
+    if (!e.title && !e.description && !e.image) continue;
+    h += `<div class="embed">${e.title ? `<div class="t">${render(e.title, m)}</div>` : ""}
+      ${e.description ? `<div class="d body">${render(e.description, m)}</div>` : ""}
+      ${e.image ? `<img src="${esc(e.image)}" alt="" loading="lazy">` : ""}</div>`;
+  }
+  h += `<div class="tools"><button data-reply="${m.id}">Reply</button><button data-mention="${m.author.id}">@</button><button data-copy="${m.id}">Copy id</button></div></div>`;
+  return h;
+}
+
+function renderMessages(keepBottom = true) {
+  const sc = $("scroller");
+  const nearBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 120;
+  let html = messages.length >= 50 ? `<button id="older">Load older messages</button>` : "";
+  if (!messages.length) html += `<div class="empty">No messages here yet. Say something.</div>`;
+  messages.forEach((m, i) => { html += msgHtml(m, messages[i - 1]); });
+  const oldHeight = sc.scrollHeight, oldTop = sc.scrollTop;
+  sc.innerHTML = html;
+  if (keepBottom === "preserve") sc.scrollTop = sc.scrollHeight - oldHeight + oldTop;
+  else if (keepBottom === true || nearBottom) sc.scrollTop = sc.scrollHeight;
+  const older = $("older"); if (older) older.onclick = loadOlder;
+}
+
+async function openChannel(id) {
+  channelId = id; store.set("channel", id);
+  const owner = channelOwner(id); if (owner) { guildId = owner; store.set("guild", owner); }
+  delete unread[id]; delete mentions[id];
+  setReply(null);
+  renderSidebar();
+  const isDm = guildId === DM;
+  const dm = state.dms.find((d) => d.id === id);
+  $("chash").textContent = isDm ? "@" : "#";
+  $("cname").textContent = dm ? dm.name : findChannelName(id);
+  $("scroller").innerHTML = `<div class="empty">Loading…</div>`;
+  const input = $("input"); input.disabled = true;
+  try {
+    const data = await api(`/api/messages?channel=${id}`);
+    if (channelId !== id) return;
+    messages = data.messages;
+    renderMessages(true);
+    input.disabled = !data.can_send;
+    input.placeholder = data.can_send ? `Message ${isDm ? "@" : "#"}${$("cname").textContent} as ${state.me ? state.me.name : "the bot"}` : "She can't send messages here";
+    if (data.can_send) input.focus();
+  } catch (err) {
+    if (channelId === id) $("scroller").innerHTML = `<div class="empty">Couldn't load this channel: ${esc(err.message)}</div>`;
+  }
+}
+
+async function loadOlder() {
+  if (!messages.length) return;
+  const id = channelId;
+  try {
+    const data = await api(`/api/messages?channel=${id}&before=${messages[0].id}`);
+    if (channelId !== id) return;
+    messages = data.messages.concat(messages);
+    renderMessages("preserve");
+    if (data.messages.length < 50) { const o = $("older"); if (o) o.remove(); }
+  } catch (err) { toast(err.message); }
+}
+
+$("scroller").onclick = (e) => {
+  const r = e.target.closest("[data-reply]");
+  if (r) { setReply(messages.find((m) => m.id === r.dataset.reply)); return; }
+  const c = e.target.closest("[data-copy]");
+  if (c) { navigator.clipboard.writeText(c.dataset.copy).then(() => toast("Copied")); return; }
+  const mn = e.target.closest("[data-mention]");
+  if (mn) { insertText(`<@${mn.dataset.mention}> `); return; }
+  const j = e.target.closest("[data-jump]");
+  if (j) { const el = document.querySelector(`.msg[data-id="${j.dataset.jump}"]`); if (el) el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+};
+
+/* ---------- composer ---------- */
+function setReply(m) {
+  replyTo = m || null;
+  $("replybar").hidden = !replyTo;
+  if (replyTo) { $("replyname").textContent = replyTo.author.name; $("input").focus(); }
+  document.querySelectorAll(".msg.replying").forEach((el) => el.classList.remove("replying"));
+  if (replyTo) { const el = document.querySelector(`.msg[data-id="${replyTo.id}"]`); if (el) el.classList.add("replying"); }
+}
+$("cancelreply").onclick = () => setReply(null);
+
+function insertText(t) {
+  const input = $("input"); if (input.disabled) return;
+  const p = input.selectionStart ?? input.value.length;
+  input.value = input.value.slice(0, p) + t + input.value.slice(input.selectionEnd ?? p);
+  input.selectionStart = input.selectionEnd = p + t.length;
+  input.focus(); autosize();
+}
+
+function autosize() {
+  const input = $("input");
+  input.style.height = "auto"; input.style.height = input.scrollHeight + "px";
+  const n = input.value.length, c = $("count");
+  c.textContent = n > 1800 ? 2000 - n : ""; c.classList.toggle("over", n > 2000);
+}
+
+$("input").addEventListener("input", () => {
+  autosize();
+  if (channelId && Date.now() - lastTyping > 8000 && $("input").value.trim()) {
+    lastTyping = Date.now(); api("/api/typing", { channel: channelId }).catch(() => {});
+  }
+});
+
+$("input").addEventListener("keydown", async (e) => {
+  if (e.key === "Escape") { setReply(null); return; }
+  if (e.key === "ArrowUp" && !$("input").value) {
+    // jump to reply to the last message, like a shortcut
+    const last = messages[messages.length - 1]; if (last) { e.preventDefault(); setReply(last); }
+    return;
+  }
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  const input = $("input"), content = input.value.trim();
+  if (!content || sending || !channelId) return;
+  if (content.length > 2000) { $("error").textContent = "Discord caps messages at 2000 characters."; return; }
+  sending = true; $("error").textContent = "";
+  try {
+    const sent = await api("/api/send", { channel: channelId, content, reply_to: replyTo && replyTo.id, ping: $("ping").checked });
+    input.value = ""; autosize(); setReply(null); lastTyping = 0;
+    addMessage(sent, true);
+  } catch (err) {
+    $("error").textContent = `Not sent: ${err.message}`;
+  } finally { sending = false; }
+});
+
+/* ---------- live updates ---------- */
+function addMessage(m, mine = false) {
+  if (m.channel_id === channelId) {
+    if (messages.some((x) => x.id === m.id)) return;
+    messages.push(m);
+    renderMessages(mine ? true : undefined);
+    if (document.hidden && (m.mentions_me || guildId === DM)) { mentions[m.channel_id] = (mentions[m.channel_id] || 0) + 1; renderSidebar(); }
+    return;
+  }
+  if (state.me && m.author.id === state.me.id) return;
+  if (!channelOwner(m.channel_id)) refreshState();   // a new DM or thread
+  unread[m.channel_id] = (unread[m.channel_id] || 0) + 1;
+  if (m.mentions_me) mentions[m.channel_id] = (mentions[m.channel_id] || 0) + 1;
+  renderSidebar();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && channelId && mentions[channelId]) { delete mentions[channelId]; renderSidebar(); }
+});
+
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => {
+    const wasDown = !socketUp && connect.everUp;
+    socketUp = true; connect.everUp = true; connect.delay = 1000; renderMe();
+    if (wasDown) { refreshState(); if (channelId) openChannel(channelId); }  // catch up on what we missed
+  };
+  ws.onmessage = (e) => {
+    const ev = JSON.parse(e.data);
+    if (ev.type === "message") addMessage(ev.message);
+    else if (ev.type === "edit" && ev.message.channel_id === channelId) {
+      const i = messages.findIndex((x) => x.id === ev.message.id);
+      if (i >= 0) { messages[i] = ev.message; renderMessages(false); }
+    } else if (ev.type === "delete" && ev.channel_id === channelId) {
+      const before = messages.length;
+      messages = messages.filter((x) => x.id !== ev.id);
+      if (messages.length !== before) renderMessages(false);
+    }
+  };
+  ws.onclose = () => {
+    socketUp = false; renderMe();
+    setTimeout(connect, connect.delay = Math.min((connect.delay || 1000) * 1.5, 10000));
+  };
+}
+
+async function refreshState() {
+  try {
+    const s = await api("/api/state");
+    // keep DMs opened this session even if discord.py dropped them from its cache
+    for (const d of state.dms) if (!s.dms.some((x) => x.id === d.id)) s.dms.push(d);
+    state = s; renderSidebar();
+  } catch (err) { toast(`Can't reach the bot: ${err.message}`); }
+}
+
+(async () => {
+  await refreshState();
+  guildId = store.get("guild") || (state.guilds[0] ? state.guilds[0].id : DM);
+  renderSidebar();
+  const last = store.get("channel");
+  if (last && channelOwner(last)) openChannel(last);
+  connect();
+})();
+</script>
+</body>
+</html>

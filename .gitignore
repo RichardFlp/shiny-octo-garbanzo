@@ -5,6 +5,13 @@
 
 # local state written by the bot
 user_memory.json
+blacklist.txt
+whitelist.txt
+punished.txt
+flag_case.json
+action_workspace/
+banned_words.txt
+unbanned_words.txt
 
 # python
 __pycache__/
@@ -18,3 +25,4 @@ __pycache__/
 node_modules/
 NVIDIA Corporation/
 New folder/
+*.bak

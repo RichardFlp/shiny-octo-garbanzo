@@ -1,0 +1,20 @@
+[Unit]
+Description=Debugger Chan Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=roland
+WorkingDirectory=/home/roland/debugger-chan
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/roland/debugger-chan/.venv/bin/python /home/roland/debugger-chan/bot.py
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=20
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
